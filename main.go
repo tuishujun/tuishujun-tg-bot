@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
@@ -39,10 +40,14 @@ type Book struct {
 	} `json:"tags"`
 }
 
+type SearchResult struct {
+	Books []Book `json:"results"`
+}
+
 // Function getBookInfo fetch info from tuishujun.com using a book id,
 // it returns an image url and a caption of the book to be displayed in telegram.
-func getBookInfo(bookId string) (imageUrl string, caption string, err error) {
-	req, err := http.NewRequest("GET", "https://api.tuishujun.com/v1/books/"+bookId, nil)
+func getBookInfo(bookName string) (imageUrl string, caption string, err error) {
+	req, err := http.NewRequest("GET", "https://api.tuishujun.com/v1/books?searchMode=bookName&key="+bookName, nil)
 	if err != nil {
 		log.Fatal("Error reading request. ", err)
 	}
@@ -50,18 +55,23 @@ func getBookInfo(bookId string) (imageUrl string, caption string, err error) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Println(err)
+		return "", "", err
 	}
 	defer resp.Body.Close()
 
 	decoder := json.NewDecoder(resp.Body)
-	var book Book
+	var result SearchResult
 
-	err = decoder.Decode(&book)
+	err = decoder.Decode(&result)
 	if err != nil {
 		return "", "", err
 	}
 
+	if len(result.Books) == 0 {
+		return "", "", errors.New("Search Hit But No Book Found")
+	}
+
+	var book = result.Books[0]
 	imageUrl = book.ImageUrl
 	caption += book.Synopisis + "\n"
 	caption += fmt.Sprintf("<pre>作者: %s  状态: %s 字数: %d 万</pre>\n", book.Author, book.Status, book.Words/10000)
@@ -123,14 +133,14 @@ func main() {
 			switch update.Message.Command() {
 			case "help":
 				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
-				msg.Text += "I can help you to get book info from tuishujun.com.\n"
-				msg.Text += "You can control me by sending these commands:\n"
+				msg.Text += "推书君 Bot 支持从推书君的网站 tuishujun.com 引用网文简介.\n"
+				msg.Text += "使用方法: /book <要搜索的书名>"
 				bot.Send(msg)
 			case "book":
 				bookId := update.Message.CommandArguments()
 				url, caption, err := getBookInfo(bookId)
 				if err != nil {
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Unable to find book")
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, "没有找到相关的内容")
 					bot.Send(msg)
 				} else {
 					msg := tgbotapi.NewPhotoShare(update.Message.Chat.ID, url)
